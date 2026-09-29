@@ -1,36 +1,50 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Real-Time Communication Web App
 
-## Getting Started
+A real-time communication platform built with **Next.js, Node.js, MongoDB, and CometChat**, created for the **CometChat Zero to Chat Hackathon 2026**.
 
-First, run the development server:
+The goal of this project is to allow users on the same platform to discover and communicate with each other through **real-time messaging, voice calls, and video calls**.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## 🚀 What I'm Building
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Users will be able to:
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+* Create and manage their profiles
+* Discover other users on the platform
+* Start 1-to-1 conversations
+* Send real-time messages
+* Make voice calls
+* Make video calls
+* See communication-related status such as online presence and typing indicators where supported
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🛠️ Tech Stack
 
-## Learn More
+* **Next.js** — Frontend and application framework
+* **Node.js** — Backend/server-side functionality
+* **MongoDB** — Application data and user information
+* **CometChat** — Real-time chat, voice calling, video calling, and communication features
+* **CometChat MCP / Skills** — Used with an AI coding agent to access CometChat's current documentation and implementation resources
+* **Vercel** — Deployment
 
-To learn more about Next.js, take a look at the following resources:
+## 🤖 CometChat MCP
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This project is being developed using the **CometChat MCP / Skills**, which allows the AI coding agent to access CometChat's verified implementation documentation and use the appropriate integration guidance while building the communication features.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The MCP is used during development, while CometChat provides the real-time communication layer used by the application.
 
-## Deploy on Vercel
+## 🎯 Hackathon Goal
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+This project is being built for the **Zero to Chat: CometChat Hackathon 2026**.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The objective is to take a web application from a basic project to a working real-time communication platform by integrating CometChat for messaging, voice, and video communication.
+
+The final goal is to have a fully working web demo that can be accessed directly through a browser and demonstrated in the hackathon's required demo format.
+
+## 📌 Project Status
+
+🚧 **Currently in development**
+
+The initial focus is getting basic CometChat messaging working in the Next.js application. Voice calling, video calling, user integration, UI improvements, and deployment will be added progressively.
+
+---
+
+Built with curiosity, AI-assisted development, and a lot of experimenting. 🚀
