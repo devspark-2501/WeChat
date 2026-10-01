@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import { Eye, EyeOff } from 'lucide-react';
 
 export default function Home() {
@@ -47,22 +46,15 @@ export default function Home() {
     <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4 font-sans">
       <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 p-8 shadow-2xl">
         
-        {/* Brand Header with Larger Logo */}
-        <div className="mb-8 flex flex-col items-center text-center">
-          <div className="w-24 h-24 mb-4 flex items-center justify-center bg-black border border-zinc-800 p-2">
-            <Image
-              src="/wechat_logo.png"
-              alt="WeChat Logo"
-              width={96}
-              height={96}
-              className="object-contain w-full h-full"
-              priority
-            />
-          </div>
-          <h1 className="text-xl font-bold font-mono tracking-widest uppercase">
-            {isLogin ? 'AUTHENTICATE' : 'CREATE ACCOUNT'}
+        {/* Brand Header with Text Only */}
+        <div className="mb-8 text-center">
+          <h1 className="text-3xl font-extrabold font-mono tracking-widest text-white uppercase pb-2">
+            WECHAT
           </h1>
-          <p className="text-xs text-zinc-500 font-mono mt-1">
+          <h2 className="text-sm font-bold font-mono tracking-wider text-zinc-400 uppercase mt-3">
+            {isLogin ? 'AUTHENTICATE' : 'CREATE ACCOUNT'}
+          </h2>
+          <p className="text-[11px] text-zinc-500 font-mono mt-1">
             {isLogin ? 'ENTER YOUR CREDENTIALS TO CONTINUE' : 'FILL IN DETAILS TO JOIN'}
           </p>
         </div>
