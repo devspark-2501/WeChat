@@ -25,10 +25,8 @@ export default function CometChatWrapper({ uid, children }) {
 
         await CometChatUIKit.init(uiKitSettings);
         
-        const loggedInUser = await CometChatUIKit.getLoggedinUser();
-        if (!loggedInUser) {
-          await CometChatUIKit.login(uid);
-        }
+        // Use CometChatUIKit.login directly to authenticate the UID session
+        await CometChatUIKit.login(uid);
 
         if (isMounted) setInitialized(true);
       } catch (err) {
