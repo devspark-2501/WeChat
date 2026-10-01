@@ -9,13 +9,45 @@ const CometChatWrapper = dynamic(() => import('@/components/CometChatWrapper'), 
 export default function ChatPage() {
   const [currentUser, setCurrentUser] = useState(null);
   const [activeTargetUser, setActiveTargetUser] = useState(null);
+  const [cometchatTargetUser, setCometchatTargetUser] = useState(null);
+  const [CometChatModules, setCometChatModules] = useState(null);
+  const [loadingChat, setLoadingChat] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem('wechat_user');
     if (stored) {
       setCurrentUser(JSON.parse(stored));
     }
+
+    // Dynamically load CometChat UI components client-side
+    import('@cometchat/chat-uikit-react').then((modules) => {
+      setCometChatModules(modules);
+    });
   }, []);
+
+  // When a user is selected from search, fetch their CometChat User Object
+  useEffect(() => {
+    async function loadCometChatUser() {
+      if (!activeTargetUser || !CometChatModules) return;
+      setLoadingChat(true);
+      try {
+        const { CometChat } = await import('@cometchat/chat-sdk-javascript');
+        const user = await CometChat.getUser(activeTargetUser.cometchatUID);
+        setCometchatTargetUser(user);
+      } catch (err) {
+        console.error("Failed to fetch CometChat User:", err);
+      } finally {
+        setLoadingChat(false);
+      }
+    }
+    loadCometChatUser();
+  }, [activeTargetUser, CometChatModules]);
+
+  function startCall(callType) {
+    if (!cometchatTargetUser) return;
+    alert(`Initiating ${callType === 'video' ? 'Video' : 'Voice'} Call to ${cometchatTargetUser.getName()}...`);
+    // Calling SDK integration connects here
+  }
 
   if (!currentUser) {
     return (
@@ -32,7 +64,7 @@ export default function ChatPage() {
     <CometChatWrapper uid={currentUser.cometchatUID}>
       <div className="flex h-screen bg-black text-white font-sans overflow-hidden">
         
-        {/* Left Sidebar: User Search & Active Profile */}
+        {/* Left Sidebar */}
         <div className="w-80 border-r border-zinc-800 flex flex-col justify-between p-4 bg-zinc-950">
           <div>
             <div className="border-b border-zinc-800 pb-3 mb-4 flex items-center justify-between">
@@ -63,11 +95,11 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Right Panel: Chat / Direct Communication Frame */}
+        {/* Right Main Chat Panel */}
         <div className="flex-1 flex flex-col bg-black">
           {activeTargetUser ? (
-            <div className="flex-1 flex flex-col h-full">
-              {/* Header Bar with Direct Call Buttons */}
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              {/* Header Bar */}
               <div className="h-14 border-b border-zinc-800 px-6 flex items-center justify-between bg-zinc-950">
                 <div>
                   <h2 className="text-sm font-bold text-white uppercase">{activeTargetUser.name}</h2>
@@ -75,13 +107,13 @@ export default function ChatPage() {
                 </div>
                 <div className="flex space-x-2 font-mono">
                   <button
-                    onClick={() => alert(`Starting Voice Call with ${activeTargetUser.name}...`)}
+                    onClick={() => startCall('audio')}
                     className="border border-zinc-700 px-3 py-1.5 text-xs text-white uppercase hover:border-white hover:bg-zinc-800"
                   >
                     📞 Voice Call
                   </button>
                   <button
-                    onClick={() => alert(`Starting Video Call with ${activeTargetUser.name}...`)}
+                    onClick={() => startCall('video')}
                     className="border border-white bg-white text-black px-3 py-1.5 text-xs uppercase font-bold hover:bg-zinc-200"
                   >
                     🎥 Video Call
@@ -89,12 +121,19 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              {/* Chat Container Placeholder for CometChat UI Frame */}
-              <div className="flex-1 p-6 flex flex-col items-center justify-center text-zinc-500 font-mono text-xs">
-                <div className="border border-zinc-800 p-8 text-center bg-zinc-950 max-w-sm">
-                  <p className="text-white text-sm font-bold mb-2">1-TO-1 CHAT READY</p>
-                  <p className="mb-4 text-zinc-400">Connected via CometChat Web SDK to target UID: {activeTargetUser.cometchatUID}</p>
-                </div>
+              {/* Chat Interface */}
+              <div className="flex-1 overflow-hidden bg-black">
+                {loadingChat ? (
+                  <div className="flex h-full items-center justify-center font-mono text-xs text-zinc-500">
+                    LOADING CHAT SESSION...
+                  </div>
+                ) : cometchatTargetUser && CometChatModules?.CometChatMessages ? (
+                  <CometChatModules.CometChatMessages user={cometchatTargetUser} />
+                ) : (
+                  <div className="flex h-full items-center justify-center font-mono text-xs text-zinc-500">
+                    INITIALIZING CHAT UI...
+                  </div>
+                )}
               </div>
             </div>
           ) : (
