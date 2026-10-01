@@ -9,6 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@cometchat/calls-sdk-javascript": "^5.0.6",
+    "@cometchat/chat-sdk-javascript": "^4.2.0",
+    "@cometchat/chat-uikit-react": "^7.2.3",
     "bcryptjs": "^3.0.3",
     "mongoose": "^9.10.3",
     "next": "16.3.7",
