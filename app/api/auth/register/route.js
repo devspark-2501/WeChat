@@ -11,7 +11,9 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    console.log('1. Connecting to MongoDB...');
     await connectToDatabase();
+    console.log('2. Connected to MongoDB successfully');
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -22,6 +24,7 @@ export async function POST(req) {
     const cometchatUID = email.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
 
     // 1. Register User in CometChat via REST API
+    console.log('3. Syncing user to CometChat...');
     const ccResponse = await fetch(
       `https://${process.env.NEXT_PUBLIC_COMETCHAT_APP_ID}.api-${process.env.NEXT_PUBLIC_COMETCHAT_REGION}.cometchat.io/v3/users`,
       {
@@ -37,6 +40,8 @@ export async function POST(req) {
     if (!ccResponse.ok) {
       const errData = await ccResponse.json();
       console.warn('CometChat User Sync Warning:', errData);
+    } else {
+      console.log('4. User synced to CometChat successfully');
     }
 
     // 2. Save User in MongoDB
@@ -47,11 +52,14 @@ export async function POST(req) {
       cometchatUID
     });
 
+    console.log('5. User created in MongoDB:', newUser._id);
+
     return NextResponse.json({
       success: true,
       user: { id: newUser._id, name: newUser.name, email: newUser.email, cometchatUID: newUser.cometchatUID }
     });
   } catch (err) {
+    console.error('REGISTER_API_ERROR:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
