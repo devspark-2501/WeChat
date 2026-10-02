@@ -19,43 +19,60 @@ export default function ChatPage() {
   const [sdk, setSdk] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [activeCallSession, setActiveCallSession] = useState(null);
-  
+  const [isMounted, setIsMounted] = useState(false);
+
   const messagesEndRef = useRef(null);
   const callContainerRef = useRef(null);
-  const callStartTimeRef = useRef(null);
 
-  // 1. Load logged-in user
+  // Mark client hydration complete & load user safely
   useEffect(() => {
-    const stored = localStorage.getItem('wechat_user');
-    if (stored) {
-      setCurrentUser(JSON.parse(stored));
+    setIsMounted(true);
+    try {
+      const stored = localStorage.getItem('wechat_user');
+      if (stored) {
+        setCurrentUser(JSON.parse(stored));
+      }
+    } catch (e) {
+      console.error('LocalStorage read error:', e);
     }
   }, []);
 
-  // 2. Load SDKs dynamically
+  // Safe dynamic import for CometChat & CometChatCalls (Prevents crash)
   useEffect(() => {
-    Promise.all([
-      import('@cometchat/chat-sdk-javascript'),
-      import('@cometchat/calls-sdk-javascript').catch(() => null)
-    ])
-      .then(([chatMod, callsMod]) => {
-        setSdk({
-          CometChat: chatMod.CometChat,
-          CometChatCalls: callsMod?.CometChatCalls || callsMod?.default
-        });
-      })
-      .catch((err) => console.error('SDK import failed:', err));
-  }, []);
+    if (!isMounted) return;
 
-  // Helper to format call durations (e.g., "02:15")
-  const formatDuration = (seconds) => {
-    if (!seconds || isNaN(seconds)) return '00:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+    let isSubscribed = true;
 
-  // 3. Fetch Recent Conversations
+    async function loadSDKs() {
+      try {
+        const chatMod = await import('@cometchat/chat-sdk-javascript');
+        let callsMod = null;
+
+        try {
+          callsMod = await import('@cometchat/calls-sdk-javascript');
+        } catch (callsErr) {
+          console.warn('Calls SDK failed to load:', callsErr);
+        }
+
+        if (isSubscribed) {
+          setSdk({
+            CometChat: chatMod.CometChat || chatMod.default,
+            CometChatCalls: callsMod?.CometChatCalls || callsMod?.default || null
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load CometChat SDK:', err);
+      }
+    }
+
+    loadSDKs();
+
+    return () => {
+      isSubscribed = false;
+    };
+  }, [isMounted]);
+
+  // Fetch Conversations
   const fetchConversations = async () => {
     if (!sdk?.CometChat) return;
 
@@ -68,7 +85,7 @@ export default function ChatPage() {
       const convList = await conversationsRequest.fetchNext();
       setConversations(convList || []);
     } catch (err) {
-      console.error('Failed to fetch conversation history:', err);
+      console.error('Failed to fetch conversations:', err);
       setConversations([]);
     } finally {
       setLoadingConversations(false);
@@ -77,75 +94,77 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (sdk && currentUser) {
-      const timer = setTimeout(() => fetchConversations(), 500);
-      return () => clearTimeout(timer);
+      fetchConversations();
     }
   }, [sdk, currentUser]);
 
-  // 4. Setup Call Listeners for incoming calls, accept, reject, end
+  // Call Event Listeners
   useEffect(() => {
     if (!sdk?.CometChat) return;
     const { CometChat } = sdk;
     const listenerID = `CALL_LISTENER_${Date.now()}`;
 
-    CometChat.addCallListener(
-      listenerID,
-      new CometChat.CallListener({
-        onIncomingCallReceived: (call) => {
-          setIncomingCall(call);
-        },
-        onOutgoingCallAccepted: (call) => {
-          startCallSession(call.getSessionId());
-        },
-        onOutgoingCallRejected: (call) => {
-          alert('Call was rejected.');
-          setIncomingCall(null);
-          setActiveCallSession(null);
-          fetchMessages();
-        },
-        onCallEndedMessageReceived: (call) => {
-          endCallCleanup();
-          fetchMessages();
-        }
-      })
-    );
+    try {
+      CometChat.addCallListener(
+        listenerID,
+        new CometChat.CallListener({
+          onIncomingCallReceived: (call) => setIncomingCall(call),
+          onOutgoingCallAccepted: (call) => startCallSession(call.getSessionId()),
+          onOutgoingCallRejected: () => {
+            alert('Call rejected');
+            setIncomingCall(null);
+            setActiveCallSession(null);
+            fetchMessages();
+          },
+          onCallEndedMessageReceived: () => {
+            endCallCleanup();
+            fetchMessages();
+          }
+        })
+      );
+    } catch (e) {
+      console.error('Call listener registration error:', e);
+    }
 
     return () => {
-      CometChat.removeCallListener(listenerID);
+      try {
+        CometChat.removeCallListener(listenerID);
+      } catch (e) {}
     };
   }, [sdk, activeTargetUser]);
 
-  // Start Call RTC Media Stream inside target HTML element
+  // Start Call Stream
   const startCallSession = (sessionId) => {
     setActiveCallSession(sessionId);
-    callStartTimeRef.current = Date.now();
 
     if (sdk?.CometChatCalls && callContainerRef.current) {
-      const callTokenSetting = new sdk.CometChatCalls.CallTokenSettingsBuilder()
-        .setSessionId(sessionId)
-        .build();
+      try {
+        const callTokenSetting = new sdk.CometChatCalls.CallTokenSettingsBuilder()
+          .setSessionId(sessionId)
+          .build();
 
-      sdk.CometChatCalls.generateToken(callTokenSetting)
-        .then((res) => {
-          const callCallSettings = new sdk.CometChatCalls.CallSettingsBuilder()
-            .enableDefaultLayout(true)
-            .setContainer(callContainerRef.current)
-            .setIsAudioOnly(false)
-            .build();
+        sdk.CometChatCalls.generateToken(callTokenSetting)
+          .then((res) => {
+            const callCallSettings = new sdk.CometChatCalls.CallSettingsBuilder()
+              .enableDefaultLayout(true)
+              .setContainer(callContainerRef.current)
+              .setIsAudioOnly(false)
+              .build();
 
-          sdk.CometChatCalls.startCall(res.token, callCallSettings);
-        })
-        .catch((err) => console.error('Call token error:', err));
+            sdk.CometChatCalls.startCall(res.token, callCallSettings);
+          })
+          .catch((err) => console.error('Call token generation error:', err));
+      } catch (err) {
+        console.error('CometChatCalls start failed:', err);
+      }
     }
   };
 
   const endCallCleanup = () => {
     setActiveCallSession(null);
     setIncomingCall(null);
-    callStartTimeRef.current = null;
   };
 
-  // End Call Button Handler
   const endCallSession = async () => {
     if (activeCallSession && sdk?.CometChat) {
       try {
@@ -167,25 +186,21 @@ export default function ChatPage() {
     const receiverType = CometChat.RECEIVER_TYPE.USER;
     const type = callType === 'video' ? CometChat.CALL_TYPE.VIDEO : CometChat.CALL_TYPE.AUDIO;
 
-    const call = new CometChat.Call(receiverID, type, receiverType);
-
     try {
-      const outgoingCall = await CometChat.initiateCall(call);
-      alert(`Calling ${activeTargetUser.name}... Waiting for response.`);
+      const call = new CometChat.Call(receiverID, type, receiverType);
+      await CometChat.initiateCall(call);
+      alert(`Calling ${activeTargetUser.name}...`);
       fetchMessages();
     } catch (error) {
       console.error('Call initiation failed:', error);
-      alert('Failed to initiate call. Check microphone/camera permissions.');
+      alert('Could not start call. Check camera/mic permissions in browser settings.');
     }
   };
 
-  // Accept Call
   const acceptCall = async () => {
     if (!incomingCall || !sdk?.CometChat) return;
-    const { CometChat } = sdk;
-
     try {
-      const acceptedCall = await CometChat.acceptCall(incomingCall.getSessionId());
+      const acceptedCall = await sdk.CometChat.acceptCall(incomingCall.getSessionId());
       setIncomingCall(null);
       startCallSession(acceptedCall.getSessionId());
     } catch (error) {
@@ -193,15 +208,12 @@ export default function ChatPage() {
     }
   };
 
-  // Reject Call
   const rejectCall = async () => {
     if (!incomingCall || !sdk?.CometChat) return;
-    const { CometChat } = sdk;
-
     try {
-      await CometChat.rejectCall(
+      await sdk.CometChat.rejectCall(
         incomingCall.getSessionId(),
-        CometChat.CALL_STATUS.REJECTED
+        sdk.CometChat.CALL_STATUS.REJECTED
       );
       setIncomingCall(null);
       fetchMessages();
@@ -210,7 +222,7 @@ export default function ChatPage() {
     }
   };
 
-  // Search Users API Call
+  // Search Users
   useEffect(() => {
     if (!searchQuery.trim() || !currentUser) {
       setSearchResults([]);
@@ -237,13 +249,12 @@ export default function ChatPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, currentUser]);
 
-  // Fetch Message & Call Logs History
+  // Fetch Message History
   const fetchMessages = async () => {
     if (!activeTargetUser || !sdk?.CometChat) return;
-    const { CometChat } = sdk;
 
     try {
-      const messagesRequest = new CometChat.MessagesRequestBuilder()
+      const messagesRequest = new sdk.CometChat.MessagesRequestBuilder()
         .setUID(activeTargetUser.cometchatUID)
         .setLimit(50)
         .build();
@@ -263,25 +274,31 @@ export default function ChatPage() {
     fetchMessages();
 
     const listenerID = `CHAT_LISTENER_${Date.now()}`;
-    CometChat.addMessageListener(
-      listenerID,
-      new CometChat.MessageListener({
-        onTextMessageReceived: (textMessage) => {
-          if (textMessage.getSender()?.getUid() === activeTargetUser.cometchatUID) {
-            setMessages((prev) => [...prev, textMessage]);
+    try {
+      CometChat.addMessageListener(
+        listenerID,
+        new CometChat.MessageListener({
+          onTextMessageReceived: (textMessage) => {
+            if (textMessage.getSender()?.getUid() === activeTargetUser.cometchatUID) {
+              setMessages((prev) => [...prev, textMessage]);
+            }
+            fetchConversations();
+          },
+          onMediaMessageReceived: (mediaMessage) => {
+            if (mediaMessage.getSender()?.getUid() === activeTargetUser.cometchatUID) {
+              setMessages((prev) => [...prev, mediaMessage]);
+            }
           }
-          fetchConversations();
-        },
-        onMediaMessageReceived: (mediaMessage) => {
-          if (mediaMessage.getSender()?.getUid() === activeTargetUser.cometchatUID) {
-            setMessages((prev) => [...prev, mediaMessage]);
-          }
-        }
-      })
-    );
+        })
+      );
+    } catch (e) {
+      console.error('Message listener error:', e);
+    }
 
     return () => {
-      CometChat.removeMessageListener(listenerID);
+      try {
+        CometChat.removeMessageListener(listenerID);
+      } catch (e) {}
     };
   }, [activeTargetUser, sdk]);
 
@@ -289,7 +306,7 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Send Text Message
+  // Send Message
   async function handleSendMessage(e) {
     e.preventDefault();
     if (!textInput.trim() || !activeTargetUser || !sdk?.CometChat) return;
@@ -300,21 +317,24 @@ export default function ChatPage() {
     setSending(true);
 
     try {
-      const receiverID = activeTargetUser.cometchatUID;
       const textMessage = new CometChat.TextMessage(
-        receiverID,
+        activeTargetUser.cometchatUID,
         text,
         CometChat.RECEIVER_TYPE.USER
       );
 
       const sentMsg = await CometChat.sendMessage(textMessage);
       setMessages((prev) => [...prev, sentMsg]);
-      await fetchConversations();
+      fetchConversations();
     } catch (err) {
       console.error('Message sending failed:', err);
     } finally {
       setSending(false);
     }
+  }
+
+  if (!isMounted) {
+    return <div className="min-h-screen bg-black text-white p-4 font-mono text-xs">Loading application...</div>;
   }
 
   if (!currentUser) {
@@ -549,9 +569,8 @@ export default function ChatPage() {
                   </div>
                 ) : (
                   messages.map((item, idx) => {
-                    const isCall = item.getCategory() === 'call' || item instanceof sdk?.CometChat?.Call;
+                    const isCall = item.getCategory?.() === 'call' || item instanceof sdk?.CometChat?.Call;
 
-                    // RENDER CALL LOG ITEM
                     if (isCall) {
                       const callStatus = item.getStatus ? item.getStatus() : item.action;
                       const callType = item.getType ? item.getType() : 'call';
@@ -586,7 +605,6 @@ export default function ChatPage() {
                       );
                     }
 
-                    // RENDER STANDARD TEXT MESSAGE ITEM
                     const isMe = item.getSender()?.getUid() === currentUser.cometchatUID;
                     return (
                       <div
