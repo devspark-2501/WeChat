@@ -22,8 +22,9 @@ export default function ChatPage() {
   
   const messagesEndRef = useRef(null);
   const callContainerRef = useRef(null);
+  const callStartTimeRef = useRef(null);
 
-  // 1. Get logged-in user session
+  // 1. Load logged-in user
   useEffect(() => {
     const stored = localStorage.getItem('wechat_user');
     if (stored) {
@@ -31,7 +32,7 @@ export default function ChatPage() {
     }
   }, []);
 
-  // 2. Dynamic import CometChat SDK & Calls SDK
+  // 2. Load SDKs dynamically
   useEffect(() => {
     Promise.all([
       import('@cometchat/chat-sdk-javascript'),
@@ -43,18 +44,23 @@ export default function ChatPage() {
           CometChatCalls: callsMod?.CometChatCalls || callsMod?.default
         });
       })
-      .catch((err) => {
-        console.error('SDK import failed:', err);
-      });
+      .catch((err) => console.error('SDK import failed:', err));
   }, []);
 
-  // 3. Fetch Recent Conversations safely
+  // Helper to format call durations (e.g., "02:15")
+  const formatDuration = (seconds) => {
+    if (!seconds || isNaN(seconds)) return '00:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // 3. Fetch Recent Conversations
   const fetchConversations = async () => {
     if (!sdk?.CometChat) return;
 
     try {
       setLoadingConversations(true);
-
       const conversationsRequest = new sdk.CometChat.ConversationsRequestBuilder()
         .setLimit(30)
         .build();
@@ -71,18 +77,15 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (sdk && currentUser) {
-      const timer = setTimeout(() => {
-        fetchConversations();
-      }, 500);
+      const timer = setTimeout(() => fetchConversations(), 500);
       return () => clearTimeout(timer);
     }
   }, [sdk, currentUser]);
 
-  // 4. Setup Calling Listener
+  // 4. Setup Call Listeners for incoming calls, accept, reject, end
   useEffect(() => {
     if (!sdk?.CometChat) return;
     const { CometChat } = sdk;
-
     const listenerID = `CALL_LISTENER_${Date.now()}`;
 
     CometChat.addCallListener(
@@ -94,14 +97,15 @@ export default function ChatPage() {
         onOutgoingCallAccepted: (call) => {
           startCallSession(call.getSessionId());
         },
-        onOutgoingCallRejected: () => {
+        onOutgoingCallRejected: (call) => {
           alert('Call was rejected.');
           setIncomingCall(null);
           setActiveCallSession(null);
+          fetchMessages();
         },
-        onCallEndedMessageReceived: () => {
-          setIncomingCall(null);
-          setActiveCallSession(null);
+        onCallEndedMessageReceived: (call) => {
+          endCallCleanup();
+          fetchMessages();
         }
       })
     );
@@ -109,11 +113,13 @@ export default function ChatPage() {
     return () => {
       CometChat.removeCallListener(listenerID);
     };
-  }, [sdk]);
+  }, [sdk, activeTargetUser]);
 
-  // Start Call Media Session in DOM Container
+  // Start Call RTC Media Stream inside target HTML element
   const startCallSession = (sessionId) => {
     setActiveCallSession(sessionId);
+    callStartTimeRef.current = Date.now();
+
     if (sdk?.CometChatCalls && callContainerRef.current) {
       const callTokenSetting = new sdk.CometChatCalls.CallTokenSettingsBuilder()
         .setSessionId(sessionId)
@@ -124,15 +130,22 @@ export default function ChatPage() {
           const callCallSettings = new sdk.CometChatCalls.CallSettingsBuilder()
             .enableDefaultLayout(true)
             .setContainer(callContainerRef.current)
+            .setIsAudioOnly(false)
             .build();
 
           sdk.CometChatCalls.startCall(res.token, callCallSettings);
         })
-        .catch((err) => console.error('Call token generation error:', err));
+        .catch((err) => console.error('Call token error:', err));
     }
   };
 
-  // End Call Media Session
+  const endCallCleanup = () => {
+    setActiveCallSession(null);
+    setIncomingCall(null);
+    callStartTimeRef.current = null;
+  };
+
+  // End Call Button Handler
   const endCallSession = async () => {
     if (activeCallSession && sdk?.CometChat) {
       try {
@@ -141,30 +154,28 @@ export default function ChatPage() {
         console.error('Error ending call:', err);
       }
     }
-    setActiveCallSession(null);
-    setIncomingCall(null);
+    endCallCleanup();
+    fetchMessages();
   };
 
-  // Initiate Voice or Video Call
+  // Initiate Call
   const initiateCall = async (callType) => {
     if (!activeTargetUser || !sdk?.CometChat) return;
 
     const { CometChat } = sdk;
     const receiverID = activeTargetUser.cometchatUID;
     const receiverType = CometChat.RECEIVER_TYPE.USER;
-    const type =
-      callType === 'video'
-        ? CometChat.CALL_TYPE.VIDEO
-        : CometChat.CALL_TYPE.AUDIO;
+    const type = callType === 'video' ? CometChat.CALL_TYPE.VIDEO : CometChat.CALL_TYPE.AUDIO;
 
     const call = new CometChat.Call(receiverID, type, receiverType);
 
     try {
       const outgoingCall = await CometChat.initiateCall(call);
       alert(`Calling ${activeTargetUser.name}... Waiting for response.`);
+      fetchMessages();
     } catch (error) {
       console.error('Call initiation failed:', error);
-      alert('Failed to initiate call. Ensure media permissions are allowed.');
+      alert('Failed to initiate call. Check microphone/camera permissions.');
     }
   };
 
@@ -193,12 +204,13 @@ export default function ChatPage() {
         CometChat.CALL_STATUS.REJECTED
       );
       setIncomingCall(null);
+      fetchMessages();
     } catch (error) {
       console.error('Call reject failed:', error);
     }
   };
 
-  // 5. Search Users API Call (Fixed typo 'fontally' -> 'finally')
+  // Search Users API Call
   useEffect(() => {
     if (!searchQuery.trim() || !currentUser) {
       setSearchResults([]);
@@ -225,26 +237,28 @@ export default function ChatPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, currentUser]);
 
-  // 6. Fetch Message History & Listener for Active Chat
-  useEffect(() => {
+  // Fetch Message & Call Logs History
+  const fetchMessages = async () => {
     if (!activeTargetUser || !sdk?.CometChat) return;
-
     const { CometChat } = sdk;
 
-    async function fetchMessages() {
-      try {
-        const messagesRequest = new CometChat.MessagesRequestBuilder()
-          .setUID(activeTargetUser.cometchatUID)
-          .setLimit(50)
-          .build();
+    try {
+      const messagesRequest = new CometChat.MessagesRequestBuilder()
+        .setUID(activeTargetUser.cometchatUID)
+        .setLimit(50)
+        .build();
 
-        const history = await messagesRequest.fetchPrevious();
-        setMessages(history || []);
-      } catch (err) {
-        console.error('Failed to fetch message history:', err);
-        setMessages([]);
-      }
+      const history = await messagesRequest.fetchPrevious();
+      setMessages(history || []);
+    } catch (err) {
+      console.error('Failed to fetch history:', err);
+      setMessages([]);
     }
+  };
+
+  useEffect(() => {
+    if (!activeTargetUser || !sdk?.CometChat) return;
+    const { CometChat } = sdk;
 
     fetchMessages();
 
@@ -257,6 +271,11 @@ export default function ChatPage() {
             setMessages((prev) => [...prev, textMessage]);
           }
           fetchConversations();
+        },
+        onMediaMessageReceived: (mediaMessage) => {
+          if (mediaMessage.getSender()?.getUid() === activeTargetUser.cometchatUID) {
+            setMessages((prev) => [...prev, mediaMessage]);
+          }
         }
       })
     );
@@ -270,7 +289,7 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 7. Send Message Handler
+  // Send Text Message
   async function handleSendMessage(e) {
     e.preventDefault();
     if (!textInput.trim() || !activeTargetUser || !sdk?.CometChat) return;
@@ -316,13 +335,17 @@ export default function ChatPage() {
     <CometChatWrapper uid={currentUser.cometchatUID}>
       <div className="flex h-screen bg-black text-white font-sans overflow-hidden relative">
         
-        {/* ACTIVE CALL MEDIA SCREEN OVERLAY */}
+        {/* ACTIVE CALL MEDIA SCREEN CONTAINER */}
         {activeCallSession && (
           <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-between p-4">
-            <div ref={callContainerRef} className="w-full flex-1 rounded-lg overflow-hidden bg-zinc-900 min-h-0" />
+            <div
+              ref={callContainerRef}
+              id="call-container"
+              className="w-full flex-1 rounded-lg overflow-hidden bg-zinc-900 min-h-0 relative"
+            />
             <button
               onClick={endCallSession}
-              className="mt-4 bg-rose-600 text-white font-mono font-bold text-xs uppercase px-8 py-3 hover:bg-rose-500 transition-colors"
+              className="mt-4 bg-rose-600 text-white font-mono font-bold text-xs uppercase px-8 py-3 hover:bg-rose-500 transition-colors z-10"
             >
               END CALL
             </button>
@@ -354,23 +377,17 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Left Sidebar - Full width on mobile, w-80 on desktop */}
+        {/* Left Sidebar */}
         <div
           className={`${
             activeTargetUser ? 'hidden md:flex' : 'flex'
           } w-full md:w-80 border-r border-zinc-800 flex-col justify-between bg-zinc-950 h-full`}
         >
           <div className="flex-1 flex flex-col h-full overflow-hidden p-4">
-            
-            {/* Header / Logout */}
             <div className="border-b border-zinc-800 pb-3 mb-4 flex items-center justify-between">
               <div>
-                <h1 className="text-base font-bold tracking-tight uppercase font-mono">
-                  WECHAT
-                </h1>
-                <p className="text-xs text-zinc-500 font-mono">
-                  USER: {currentUser.name}
-                </p>
+                <h1 className="text-base font-bold tracking-tight uppercase font-mono">WECHAT</h1>
+                <p className="text-xs text-zinc-500 font-mono">USER: {currentUser.name}</p>
               </div>
               <button
                 onClick={() => {
@@ -383,7 +400,6 @@ export default function ChatPage() {
               </button>
             </div>
 
-            {/* Search Bar */}
             <div className="mb-4">
               <input
                 type="text"
@@ -394,7 +410,6 @@ export default function ChatPage() {
               />
             </div>
 
-            {/* Sidebar View */}
             <div className="flex-1 overflow-y-auto">
               {searchQuery.trim().length > 0 ? (
                 <div className="space-y-2">
@@ -482,28 +497,14 @@ export default function ChatPage() {
               )}
             </div>
           </div>
-
-          {activeTargetUser && (
-            <div className="border-t border-zinc-800 p-3 bg-zinc-900">
-              <span className="text-[10px] font-mono uppercase text-zinc-400 tracking-wider">
-                SELECTED TARGET
-              </span>
-              <p className="text-sm font-bold text-white mt-0.5 truncate">{activeTargetUser.name}</p>
-              <p className="text-xs font-mono text-zinc-500 truncate">{activeTargetUser.cometchatUID}</p>
-            </div>
-          )}
         </div>
 
-        {/* Right Chat Panel - Hidden on mobile when no conversation is active */}
-        <div
-          className={`${
-            activeTargetUser ? 'flex' : 'hidden md:flex'
-          } flex-1 flex-col bg-black h-full w-full`}
-        >
+        {/* Right Chat Panel */}
+        <div className={`${activeTargetUser ? 'flex' : 'hidden md:flex'} flex-1 flex-col bg-black h-full w-full`}>
           {activeTargetUser ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
               
-              {/* Responsive Chat Header with Back Button for Mobile */}
+              {/* Header */}
               <div className="h-14 border-b border-zinc-800 px-4 md:px-6 flex items-center justify-between bg-zinc-950">
                 <div className="flex items-center space-x-3 truncate">
                   <button
@@ -537,7 +538,7 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              {/* Messages Feed */}
+              {/* Messages & Call Logs Feed */}
               <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 bg-black">
                 {messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center">
@@ -547,11 +548,49 @@ export default function ChatPage() {
                     <p className="text-xs font-mono text-zinc-700">Send a message below to start chatting</p>
                   </div>
                 ) : (
-                  messages.map((msg, idx) => {
-                    const isMe = msg.getSender()?.getUid() === currentUser.cometchatUID;
+                  messages.map((item, idx) => {
+                    const isCall = item.getCategory() === 'call' || item instanceof sdk?.CometChat?.Call;
+
+                    // RENDER CALL LOG ITEM
+                    if (isCall) {
+                      const callStatus = item.getStatus ? item.getStatus() : item.action;
+                      const callType = item.getType ? item.getType() : 'call';
+                      const isMe = item.getSender()?.getUid() === currentUser.cometchatUID;
+
+                      let statusText = 'Call Logged';
+                      let icon = '📞';
+
+                      if (callStatus === 'initiated') {
+                        statusText = isMe ? `Outgoing ${callType} call` : `Incoming ${callType} call`;
+                      } else if (callStatus === 'rejected' || callStatus === 'cancelled') {
+                        statusText = `Missed ${callType} call`;
+                        icon = '🚫';
+                      } else if (callStatus === 'ended') {
+                        statusText = `${callType.toUpperCase()} call ended`;
+                        icon = '⏱️';
+                      }
+
+                      return (
+                        <div key={item.getId() || idx} className="flex justify-center my-2">
+                          <div className="bg-zinc-900 border border-zinc-800 px-4 py-2 font-mono text-[11px] text-zinc-400 flex items-center space-x-2 rounded-sm">
+                            <span>{icon}</span>
+                            <span className="uppercase text-white font-semibold">{statusText}</span>
+                            <span className="text-[9px] text-zinc-600 uppercase">
+                              {new Date((item.getSentAt() || Date.now() / 1000) * 1000).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // RENDER STANDARD TEXT MESSAGE ITEM
+                    const isMe = item.getSender()?.getUid() === currentUser.cometchatUID;
                     return (
                       <div
-                        key={msg.getId() || idx}
+                        key={item.getId() || idx}
                         className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                       >
                         <div
@@ -561,10 +600,10 @@ export default function ChatPage() {
                               : 'bg-zinc-900 text-white border-zinc-800'
                           }`}
                         >
-                          {msg.getText()}
+                          {item.getText ? item.getText() : ''}
                         </div>
                         <span className="text-[9px] font-mono text-zinc-600 mt-1 uppercase">
-                          {new Date((msg.getSentAt() || Date.now() / 1000) * 1000).toLocaleTimeString([], {
+                          {new Date((item.getSentAt() || Date.now() / 1000) * 1000).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit'
                           })}
