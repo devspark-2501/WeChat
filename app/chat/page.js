@@ -17,6 +17,8 @@ export default function ChatPage() {
   const [textInput, setTextInput] = useState('');
   const [sending, setSending] = useState(false);
   const [sdk, setSdk] = useState(null);
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [activeCallSession, setActiveCallSession] = useState(null);
   const messagesEndRef = useRef(null);
 
   // 1. Get logged-in user session
@@ -27,30 +29,29 @@ export default function ChatPage() {
     }
   }, []);
 
-  // 2. Dynamic import CometChat SDK
+  // 2. Dynamic import CometChat SDK & Calls SDK
   useEffect(() => {
-    import('@cometchat/chat-sdk-javascript')
-      .then((mod) => {
-        setSdk(mod);
+    Promise.all([
+      import('@cometchat/chat-sdk-javascript'),
+      import('@cometchat/calls-sdk-javascript').catch(() => null)
+    ])
+      .then(([chatMod, callsMod]) => {
+        setSdk({
+          CometChat: chatMod.CometChat,
+          CometChatCalls: callsMod?.CometChatCalls
+        });
       })
       .catch((err) => {
         console.error('SDK import failed:', err);
       });
   }, []);
 
-  // 3. Fetch Recent Conversations (Recent Chats History) safely
+  // 3. Fetch Recent Conversations safely
   const fetchConversations = async () => {
     if (!sdk?.CometChat) return;
 
     try {
       setLoadingConversations(true);
-
-      // Verify user logged in to CometChat SDK to prevent unhandledRejection
-      const loggedInUser = await sdk.CometChat.getLoggedinUser().catch(() => null);
-      if (!loggedInUser) {
-        setLoadingConversations(false);
-        return;
-      }
 
       const conversationsRequest = new sdk.CometChat.ConversationsRequestBuilder()
         .setLimit(30)
@@ -68,11 +69,111 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (sdk && currentUser) {
-      fetchConversations();
+      // Delay slightly to ensure CometChatWrapper finished SDK authentication
+      const timer = setTimeout(() => {
+        fetchConversations();
+      }, 500);
+      return () => clearTimeout(timer);
     }
   }, [sdk, currentUser]);
 
-  // 4. Search Users API Call
+  // 4. Setup Calling Listener
+  useEffect(() => {
+    if (!sdk?.CometChat) return;
+    const { CometChat } = sdk;
+
+    const listenerID = `CALL_LISTENER_${Date.now()}`;
+
+    CometChat.addCallListener(
+      listenerID,
+      new CometChat.CallListener({
+        onIncomingCallReceived: (call) => {
+          console.log('Incoming call received:', call);
+          setIncomingCall(call);
+        },
+        onOutgoingCallAccepted: (call) => {
+          console.log('Outgoing call accepted:', call);
+          startCallSession(call.getSessionId());
+        },
+        onOutgoingCallRejected: (call) => {
+          alert('Call was rejected.');
+          setIncomingCall(null);
+          setActiveCallSession(null);
+        },
+        onCallEndedMessageReceived: (call) => {
+          console.log('Call ended:', call);
+          setIncomingCall(null);
+          setActiveCallSession(null);
+        }
+      })
+    );
+
+    return () => {
+      CometChat.removeCallListener(listenerID);
+    };
+  }, [sdk]);
+
+  // Initiate Voice or Video Call
+  const initiateCall = async (callType) => {
+    if (!activeTargetUser || !sdk?.CometChat) return;
+
+    const { CometChat } = sdk;
+    const receiverID = activeTargetUser.cometchatUID;
+    const receiverType = CometChat.RECEIVER_TYPE.USER;
+    const type =
+      callType === 'video'
+        ? CometChat.CALL_TYPE.VIDEO
+        : CometChat.CALL_TYPE.AUDIO;
+
+    const call = new CometChat.Call(receiverID, type, receiverType);
+
+    try {
+      const outgoingCall = await CometChat.initiateCall(call);
+      console.log('Call initiated:', outgoingCall);
+      alert(`Calling ${activeTargetUser.name}... Waiting for response.`);
+    } catch (error) {
+      console.error('Call initiation failed:', error);
+      alert('Failed to initiate call. Ensure media permissions are allowed.');
+    }
+  };
+
+  // Accept Call
+  const acceptCall = async () => {
+    if (!incomingCall || !sdk?.CometChat) return;
+    const { CometChat } = sdk;
+
+    try {
+      const acceptedCall = await CometChat.acceptCall(incomingCall.getSessionId());
+      console.log('Call accepted:', acceptedCall);
+      setIncomingCall(null);
+      startCallSession(acceptedCall.getSessionId());
+    } catch (error) {
+      console.error('Call accept failed:', error);
+    }
+  };
+
+  // Reject Call
+  const rejectCall = async () => {
+    if (!incomingCall || !sdk?.CometChat) return;
+    const { CometChat } = sdk;
+
+    try {
+      await CometChat.rejectCall(
+        incomingCall.getSessionId(),
+        CometChat.CALL_STATUS.REJECTED
+      );
+      setIncomingCall(null);
+    } catch (error) {
+      console.error('Call reject failed:', error);
+    }
+  };
+
+  // Start Call Media Session
+  const startCallSession = (sessionId) => {
+    setActiveCallSession(sessionId);
+  };
+
+  // 5. Search Users API Call
   useEffect(() => {
     if (!searchQuery.trim() || !currentUser) {
       setSearchResults([]);
@@ -99,7 +200,7 @@ export default function ChatPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, currentUser]);
 
-  // 5. Fetch Message History & Listener for Active Chat
+  // 6. Fetch Message History & Listener for Active Chat
   useEffect(() => {
     if (!activeTargetUser || !sdk?.CometChat) return;
 
@@ -122,7 +223,6 @@ export default function ChatPage() {
 
     fetchMessages();
 
-    // Listen for incoming messages
     const listenerID = `CHAT_LISTENER_${Date.now()}`;
     CometChat.addMessageListener(
       listenerID,
@@ -141,12 +241,11 @@ export default function ChatPage() {
     };
   }, [activeTargetUser, sdk]);
 
-  // Auto-scroll to bottom of chat
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 6. Send Message Handler
+  // 7. Send Message Handler
   async function handleSendMessage(e) {
     e.preventDefault();
     if (!textInput.trim() || !activeTargetUser || !sdk?.CometChat) return;
@@ -166,8 +265,6 @@ export default function ChatPage() {
 
       const sentMsg = await CometChat.sendMessage(textMessage);
       setMessages((prev) => [...prev, sentMsg]);
-
-      // Update recent chats list
       await fetchConversations();
     } catch (err) {
       console.error('Message sending failed:', err);
@@ -192,7 +289,33 @@ export default function ChatPage() {
 
   return (
     <CometChatWrapper uid={currentUser.cometchatUID}>
-      <div className="flex h-screen bg-black text-white font-sans overflow-hidden">
+      <div className="flex h-screen bg-black text-white font-sans overflow-hidden relative">
+        
+        {/* INCOMING CALL MODAL POPUP */}
+        {incomingCall && (
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="bg-zinc-900 border border-zinc-700 p-6 max-w-sm w-full text-center space-y-4 font-mono">
+              <span className="text-xs text-zinc-400 uppercase tracking-widest block">INCOMING CALL</span>
+              <h3 className="text-lg font-bold text-white">{incomingCall.sender?.name || 'Unknown User'}</h3>
+              <p className="text-xs text-zinc-500 uppercase">{incomingCall.type} CALL</p>
+              <div className="flex gap-3 justify-center pt-2">
+                <button
+                  onClick={acceptCall}
+                  className="bg-emerald-600 text-white font-bold text-xs uppercase px-5 py-2.5 hover:bg-emerald-500 transition-colors"
+                >
+                  ACCEPT
+                </button>
+                <button
+                  onClick={rejectCall}
+                  className="bg-rose-600 text-white font-bold text-xs uppercase px-5 py-2.5 hover:bg-rose-500 transition-colors"
+                >
+                  REJECT
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Left Sidebar */}
         <div className="w-80 border-r border-zinc-800 flex flex-col justify-between bg-zinc-950">
           <div className="flex-1 flex flex-col h-full overflow-hidden p-4">
@@ -218,7 +341,7 @@ export default function ChatPage() {
               </button>
             </div>
 
-            {/* Single Search Bar */}
+            {/* Search Bar */}
             <div className="mb-4">
               <input
                 type="text"
@@ -229,10 +352,9 @@ export default function ChatPage() {
               />
             </div>
 
-            {/* Dynamic Sidebar Content: Search Results OR Recent Chats */}
+            {/* Sidebar View */}
             <div className="flex-1 overflow-y-auto">
               {searchQuery.trim().length > 0 ? (
-                /* Search View */
                 <div className="space-y-2">
                   <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider mb-2 block">
                     SEARCH RESULTS
@@ -248,17 +370,13 @@ export default function ChatPage() {
                         className="p-3 bg-black border border-zinc-900 hover:border-zinc-700 flex justify-between items-center transition-colors"
                       >
                         <div className="truncate mr-2">
-                          <p className="text-xs font-bold text-white truncate">
-                            {user.name}
-                          </p>
-                          <p className="text-[10px] font-mono text-zinc-500 truncate">
-                            {user.email}
-                          </p>
+                          <p className="text-xs font-bold text-white truncate">{user.name}</p>
+                          <p className="text-[10px] font-mono text-zinc-500 truncate">{user.email}</p>
                         </div>
                         <button
                           onClick={() => {
                             setActiveTargetUser(user);
-                            setSearchQuery(''); // clear search to show conversation list
+                            setSearchQuery('');
                           }}
                           className="bg-white text-black font-mono text-[10px] font-bold px-2 py-1 uppercase hover:bg-zinc-200"
                         >
@@ -269,7 +387,6 @@ export default function ChatPage() {
                   )}
                 </div>
               ) : (
-                /* Recent Chats View */
                 <div className="space-y-1">
                   <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider mb-2 block">
                     RECENT CHATS
@@ -286,10 +403,8 @@ export default function ChatPage() {
                       const conversationWith = conv.getConversationWith();
                       const targetName = conversationWith?.getName() || 'User';
                       const targetUID = conversationWith?.getUid();
-                      const lastMsg =
-                        conv.getLastMessage()?.getText() || 'Start chatting';
-                      const isSelected =
-                        activeTargetUser?.cometchatUID === targetUID;
+                      const lastMsg = conv.getLastMessage()?.getText() || 'Start chatting';
+                      const isSelected = activeTargetUser?.cometchatUID === targetUID;
 
                       return (
                         <div
@@ -307,24 +422,16 @@ export default function ChatPage() {
                           }`}
                         >
                           <div className="flex justify-between items-center mb-1">
-                            <span className="text-xs font-bold text-white truncate">
-                              {targetName}
-                            </span>
+                            <span className="text-xs font-bold text-white truncate">{targetName}</span>
                             {conv.getLastMessage() && (
                               <span className="text-[9px] font-mono text-zinc-600">
                                 {new Date(
-                                  (conv.getLastMessage()?.getSentAt() ||
-                                    Date.now() / 1000) * 1000
-                                ).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
+                                  (conv.getLastMessage()?.getSentAt() || Date.now() / 1000) * 1000
+                                ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </span>
                             )}
                           </div>
-                          <p className="text-[11px] text-zinc-400 font-mono truncate">
-                            {lastMsg}
-                          </p>
+                          <p className="text-[11px] text-zinc-400 font-mono truncate">{lastMsg}</p>
                         </div>
                       );
                     })
@@ -334,45 +441,37 @@ export default function ChatPage() {
             </div>
           </div>
 
-          {/* Active User Footer Badge */}
           {activeTargetUser && (
             <div className="border-t border-zinc-800 p-3 bg-zinc-900">
               <span className="text-[10px] font-mono uppercase text-zinc-400 tracking-wider">
                 SELECTED TARGET
               </span>
-              <p className="text-sm font-bold text-white mt-0.5 truncate">
-                {activeTargetUser.name}
-              </p>
-              <p className="text-xs font-mono text-zinc-500 truncate">
-                {activeTargetUser.cometchatUID}
-              </p>
+              <p className="text-sm font-bold text-white mt-0.5 truncate">{activeTargetUser.name}</p>
+              <p className="text-xs font-mono text-zinc-500 truncate">{activeTargetUser.cometchatUID}</p>
             </div>
           )}
         </div>
 
-        {/* Right Main Chat Panel */}
+        {/* Right Chat Panel */}
         <div className="flex-1 flex flex-col bg-black">
           {activeTargetUser ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
-              {/* Main Chat Header */}
+              
+              {/* Header */}
               <div className="h-14 border-b border-zinc-800 px-6 flex items-center justify-between bg-zinc-950">
                 <div>
-                  <h2 className="text-sm font-bold text-white uppercase">
-                    {activeTargetUser.name}
-                  </h2>
-                  <p className="text-xs font-mono text-zinc-500">
-                    UID: {activeTargetUser.cometchatUID}
-                  </p>
+                  <h2 className="text-sm font-bold text-white uppercase">{activeTargetUser.name}</h2>
+                  <p className="text-xs font-mono text-zinc-500">UID: {activeTargetUser.cometchatUID}</p>
                 </div>
                 <div className="flex space-x-2 font-mono">
                   <button
-                    onClick={() => alert(`Voice Call with ${activeTargetUser.name}`)}
+                    onClick={() => initiateCall('audio')}
                     className="border border-zinc-700 px-3 py-1.5 text-xs text-white uppercase hover:border-white transition-colors"
                   >
                     📞 Voice Call
                   </button>
                   <button
-                    onClick={() => alert(`Video Call with ${activeTargetUser.name}`)}
+                    onClick={() => initiateCall('video')}
                     className="border border-white bg-white text-black px-3 py-1.5 text-xs uppercase font-bold hover:bg-zinc-200 transition-colors"
                   >
                     🎥 Video Call
@@ -380,16 +479,14 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              {/* Message Feed */}
+              {/* Messages Feed */}
               <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-black">
                 {messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center">
                     <p className="text-xs font-mono text-zinc-600 uppercase tracking-widest mb-1">
                       NO MESSAGES YET
                     </p>
-                    <p className="text-xs font-mono text-zinc-700">
-                      Send a message below to start chatting
-                    </p>
+                    <p className="text-xs font-mono text-zinc-700">Send a message below to start chatting</p>
                   </div>
                 ) : (
                   messages.map((msg, idx) => {
@@ -397,9 +494,7 @@ export default function ChatPage() {
                     return (
                       <div
                         key={msg.getId() || idx}
-                        className={`flex flex-col ${
-                          isMe ? 'items-end' : 'items-start'
-                        }`}
+                        className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                       >
                         <div
                           className={`max-w-md px-4 py-2.5 text-xs font-sans border ${
@@ -411,9 +506,7 @@ export default function ChatPage() {
                           {msg.getText()}
                         </div>
                         <span className="text-[9px] font-mono text-zinc-600 mt-1 uppercase">
-                          {new Date(
-                            (msg.getSentAt() || Date.now() / 1000) * 1000
-                          ).toLocaleTimeString([], {
+                          {new Date((msg.getSentAt() || Date.now() / 1000) * 1000).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit'
                           })}
@@ -425,11 +518,8 @@ export default function ChatPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Message Input Box */}
-              <form
-                onSubmit={handleSendMessage}
-                className="p-4 border-t border-zinc-800 bg-zinc-950 flex gap-2"
-              >
+              {/* Input Form */}
+              <form onSubmit={handleSendMessage} className="p-4 border-t border-zinc-800 bg-zinc-950 flex gap-2">
                 <input
                   type="text"
                   value={textInput}
@@ -445,6 +535,7 @@ export default function ChatPage() {
                   {sending ? 'SENDING...' : 'SEND'}
                 </button>
               </form>
+
             </div>
           ) : (
             <div className="flex-1 flex items-center justify-center font-mono text-xs text-zinc-600 uppercase tracking-widest">
@@ -452,6 +543,7 @@ export default function ChatPage() {
             </div>
           )}
         </div>
+
       </div>
     </CometChatWrapper>
   );
