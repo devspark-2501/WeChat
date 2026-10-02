@@ -45,6 +45,8 @@ The final goal is to have a fully working web demo that can be accessed directly
 
 The initial focus is getting basic CometChat messaging working in the Next.js application. Voice calling, video calling, user integration, UI improvements, and deployment will be added progressively.
 
+# Visit it yourself!!
+https://we-chat-lac.vercel.app
 ---
 
 Built with curiosity, AI-assisted development, and a lot of experimenting. 🚀
