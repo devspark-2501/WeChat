@@ -32,7 +32,6 @@ export default function Home() {
         throw new Error(data.error || 'Something went wrong');
       }
 
-      // Save user session to localStorage and navigate to /chat
       localStorage.setItem('wechat_user', JSON.stringify(data.user));
       router.push('/chat');
     } catch (err) {
@@ -43,24 +42,24 @@ export default function Home() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4 font-sans">
-      <div className="w-full max-w-sm bg-zinc-950 border border-zinc-800 p-8 shadow-2xl">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4 sm:p-6 font-sans">
+      <div className="w-full max-w-sm sm:max-w-md bg-zinc-950 border border-zinc-800 p-6 sm:p-8 shadow-2xl rounded-none">
         
-        {/* Brand Header with Text Only */}
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-extrabold font-mono tracking-widest text-white uppercase pb-2">
+        {/* Brand Header */}
+        <div className="mb-6 sm:mb-8 text-center">
+          <h1 className="text-2xl sm:text-3xl font-extrabold font-mono tracking-widest text-white uppercase pb-2">
             WECHAT
           </h1>
-          <h2 className="text-sm font-bold font-mono tracking-wider text-zinc-400 uppercase mt-3">
+          <h2 className="text-xs sm:text-sm font-bold font-mono tracking-wider text-zinc-400 uppercase mt-2">
             {isLogin ? 'AUTHENTICATE' : 'CREATE ACCOUNT'}
           </h2>
-          <p className="text-[11px] text-zinc-500 font-mono mt-1">
+          <p className="text-[10px] sm:text-[11px] text-zinc-500 font-mono mt-1">
             {isLogin ? 'ENTER YOUR CREDENTIALS TO CONTINUE' : 'FILL IN DETAILS TO JOIN'}
           </p>
         </div>
 
         {error && (
-          <div className="mb-6 p-3 bg-zinc-900 border border-red-800 text-red-400 text-xs font-mono">
+          <div className="mb-6 p-3 bg-zinc-900 border border-red-800 text-red-400 text-xs font-mono break-words">
             ERR: {error}
           </div>
         )}
@@ -134,7 +133,7 @@ export default function Home() {
               setIsLogin(!isLogin);
               setError('');
             }}
-            className="text-xs font-mono text-zinc-400 hover:text-white transition-colors uppercase tracking-wider"
+            className="text-[11px] sm:text-xs font-mono text-zinc-400 hover:text-white transition-colors uppercase tracking-wider"
           >
             {isLogin ? '[ NEED AN ACCOUNT? REGISTER ]' : '[ ALREADY REGISTERED? LOG IN ]'}
           </button>
