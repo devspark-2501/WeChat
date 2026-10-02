@@ -69,7 +69,6 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (sdk && currentUser) {
-      // Delay slightly to ensure CometChatWrapper finished SDK authentication
       const timer = setTimeout(() => {
         fetchConversations();
       }, 500);
@@ -88,20 +87,17 @@ export default function ChatPage() {
       listenerID,
       new CometChat.CallListener({
         onIncomingCallReceived: (call) => {
-          console.log('Incoming call received:', call);
           setIncomingCall(call);
         },
         onOutgoingCallAccepted: (call) => {
-          console.log('Outgoing call accepted:', call);
           startCallSession(call.getSessionId());
         },
-        onOutgoingCallRejected: (call) => {
+        onOutgoingCallRejected: () => {
           alert('Call was rejected.');
           setIncomingCall(null);
           setActiveCallSession(null);
         },
-        onCallEndedMessageReceived: (call) => {
-          console.log('Call ended:', call);
+        onCallEndedMessageReceived: () => {
           setIncomingCall(null);
           setActiveCallSession(null);
         }
@@ -129,7 +125,6 @@ export default function ChatPage() {
 
     try {
       const outgoingCall = await CometChat.initiateCall(call);
-      console.log('Call initiated:', outgoingCall);
       alert(`Calling ${activeTargetUser.name}... Waiting for response.`);
     } catch (error) {
       console.error('Call initiation failed:', error);
@@ -144,7 +139,6 @@ export default function ChatPage() {
 
     try {
       const acceptedCall = await CometChat.acceptCall(incomingCall.getSessionId());
-      console.log('Call accepted:', acceptedCall);
       setIncomingCall(null);
       startCallSession(acceptedCall.getSessionId());
     } catch (error) {
@@ -192,7 +186,7 @@ export default function ChatPage() {
         }
       } catch (err) {
         console.error('User search failed:', err);
-      } finally {
+      } fontally {
         setSearching(false);
       }
     }, 300);
@@ -316,8 +310,12 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Left Sidebar */}
-        <div className="w-80 border-r border-zinc-800 flex flex-col justify-between bg-zinc-950">
+        {/* Left Sidebar - Full width on mobile, w-80 on desktop */}
+        <div
+          className={`${
+            activeTargetUser ? 'hidden md:flex' : 'flex'
+          } w-full md:w-80 border-r border-zinc-800 flex-col justify-between bg-zinc-950 h-full`}
+        >
           <div className="flex-1 flex flex-col h-full overflow-hidden p-4">
             
             {/* Header / Logout */}
@@ -452,35 +450,51 @@ export default function ChatPage() {
           )}
         </div>
 
-        {/* Right Chat Panel */}
-        <div className="flex-1 flex flex-col bg-black">
+        {/* Right Chat Panel - Hidden on mobile when no conversation is active */}
+        <div
+          className={`${
+            activeTargetUser ? 'flex' : 'hidden md:flex'
+          } flex-1 flex-col bg-black h-full w-full`}
+        >
           {activeTargetUser ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
               
-              {/* Header */}
-              <div className="h-14 border-b border-zinc-800 px-6 flex items-center justify-between bg-zinc-950">
-                <div>
-                  <h2 className="text-sm font-bold text-white uppercase">{activeTargetUser.name}</h2>
-                  <p className="text-xs font-mono text-zinc-500">UID: {activeTargetUser.cometchatUID}</p>
+              {/* Responsive Chat Header with Back Button for Mobile */}
+              <div className="h-14 border-b border-zinc-800 px-4 md:px-6 flex items-center justify-between bg-zinc-950">
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => setActiveTargetUser(null)}
+                    className="md:hidden border border-zinc-700 px-2.5 py-1 text-xs font-mono text-zinc-300 hover:border-white"
+                  >
+                    ← BACK
+                  </button>
+                  <div className="truncate">
+                    <h2 className="text-xs md:text-sm font-bold text-white uppercase truncate">
+                      {activeTargetUser.name}
+                    </h2>
+                    <p className="text-[10px] md:text-xs font-mono text-zinc-500 truncate">
+                      UID: {activeTargetUser.cometchatUID}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex space-x-2 font-mono">
+                <div className="flex space-x-1.5 md:space-x-2 font-mono">
                   <button
                     onClick={() => initiateCall('audio')}
-                    className="border border-zinc-700 px-3 py-1.5 text-xs text-white uppercase hover:border-white transition-colors"
+                    className="border border-zinc-700 px-2 md:px-3 py-1.5 text-[10px] md:text-xs text-white uppercase hover:border-white transition-colors"
                   >
-                    📞 Voice Call
+                    📞 <span className="hidden sm:inline">Voice Call</span>
                   </button>
                   <button
                     onClick={() => initiateCall('video')}
-                    className="border border-white bg-white text-black px-3 py-1.5 text-xs uppercase font-bold hover:bg-zinc-200 transition-colors"
+                    className="border border-white bg-white text-black px-2 md:px-3 py-1.5 text-[10px] md:text-xs uppercase font-bold hover:bg-zinc-200 transition-colors"
                   >
-                    🎥 Video Call
+                    🎥 <span className="hidden sm:inline">Video Call</span>
                   </button>
                 </div>
               </div>
 
               {/* Messages Feed */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-black">
+              <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 bg-black">
                 {messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center">
                     <p className="text-xs font-mono text-zinc-600 uppercase tracking-widest mb-1">
@@ -497,7 +511,7 @@ export default function ChatPage() {
                         className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
                       >
                         <div
-                          className={`max-w-md px-4 py-2.5 text-xs font-sans border ${
+                          className={`max-w-[85%] md:max-w-md px-3.5 py-2 md:px-4 md:py-2.5 text-xs font-sans border ${
                             isMe
                               ? 'bg-white text-black border-white'
                               : 'bg-zinc-900 text-white border-zinc-800'
@@ -519,26 +533,26 @@ export default function ChatPage() {
               </div>
 
               {/* Input Form */}
-              <form onSubmit={handleSendMessage} className="p-4 border-t border-zinc-800 bg-zinc-950 flex gap-2">
+              <form onSubmit={handleSendMessage} className="p-3 md:p-4 border-t border-zinc-800 bg-zinc-950 flex gap-2">
                 <input
                   type="text"
                   value={textInput}
                   onChange={(e) => setTextInput(e.target.value)}
                   placeholder={`Message ${activeTargetUser.name}...`}
-                  className="flex-1 bg-black border border-zinc-800 px-4 py-2.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-white transition-colors"
+                  className="flex-1 bg-black border border-zinc-800 px-3 md:px-4 py-2 md:py-2.5 text-xs text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-white transition-colors"
                 />
                 <button
                   type="submit"
                   disabled={sending || !textInput.trim()}
-                  className="bg-white text-black font-mono font-bold text-xs uppercase px-6 py-2.5 hover:bg-zinc-200 transition-colors disabled:opacity-50"
+                  className="bg-white text-black font-mono font-bold text-xs uppercase px-4 md:px-6 py-2 md:py-2.5 hover:bg-zinc-200 transition-colors disabled:opacity-50"
                 >
-                  {sending ? 'SENDING...' : 'SEND'}
+                  {sending ? '...' : 'SEND'}
                 </button>
               </form>
 
             </div>
           ) : (
-            <div className="flex-1 flex items-center justify-center font-mono text-xs text-zinc-600 uppercase tracking-widest">
+            <div className="flex-1 flex items-center justify-center font-mono text-xs text-zinc-600 uppercase tracking-widest p-4 text-center">
               SELECT A USER FROM RECENT CHATS OR SEARCH TO START CHATTING
             </div>
           )}
