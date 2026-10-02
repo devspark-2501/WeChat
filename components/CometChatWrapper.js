@@ -2,35 +2,40 @@
 
 import { useEffect, useState } from 'react';
 
-export default function CometChatWrapper({ uid, children }) {
-  const [initialized, setInitialized] = useState(false);
+export default function CometChatWrapper({ children, uid }) {
+  const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
 
     async function initCometChat() {
       try {
-        const { CometChatUIKit, UIKitSettingsBuilder } = await import('@cometchat/chat-uikit-react');
-        
-        const appId = process.env.NEXT_PUBLIC_COMETCHAT_APP_ID;
+        const { CometChat } = await import('@cometchat/chat-sdk-javascript');
+
+        const appID = process.env.NEXT_PUBLIC_COMETCHAT_APP_ID;
         const region = process.env.NEXT_PUBLIC_COMETCHAT_REGION;
         const authKey = process.env.NEXT_PUBLIC_COMETCHAT_AUTH_KEY;
 
-        const uiKitSettings = new UIKitSettingsBuilder()
-          .setAppId(appId)
-          .setRegion(region)
-          .setAuthKey(authKey)
+        const appSetting = new CometChat.AppSettingsBuilder()
           .subscribePresenceForAllUsers()
+          .setRegion(region)
           .build();
 
-        await CometChatUIKit.init(uiKitSettings);
-        
-        // Use CometChatUIKit.login directly to authenticate the UID session
-        await CometChatUIKit.login(uid);
+        await CometChat.init(appID, appSetting);
 
-        if (isMounted) setInitialized(true);
-      } catch (err) {
-        console.error('CometChat Init Error:', err);
+        const user = await CometChat.getLoggedinUser();
+        if (!user && uid) {
+          await CometChat.login(uid, authKey);
+        }
+
+        if (isMounted) {
+          setIsInitialized(true);
+        }
+      } catch (error) {
+        console.error('CometChat Wrapper initialization error:', error);
+        if (isMounted) {
+          setIsInitialized(true);
+        }
       }
     }
 
@@ -38,13 +43,15 @@ export default function CometChatWrapper({ uid, children }) {
       initCometChat();
     }
 
-    return () => { isMounted = false; };
+    return () => {
+      isMounted = false;
+    };
   }, [uid]);
 
-  if (!initialized) {
+  if (!isInitialized) {
     return (
-      <div className="flex items-center justify-center h-screen bg-black text-white text-xs tracking-widest uppercase font-mono">
-        INITIALIZING COMETCHAT ENGINE...
+      <div className="flex h-screen bg-black text-white items-center justify-center font-mono text-xs uppercase tracking-widest">
+        INITIALIZING SESSION...
       </div>
     );
   }
