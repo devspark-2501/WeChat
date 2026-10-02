@@ -19,7 +19,9 @@ export default function ChatPage() {
   const [sdk, setSdk] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [activeCallSession, setActiveCallSession] = useState(null);
+  
   const messagesEndRef = useRef(null);
+  const callContainerRef = useRef(null);
 
   // 1. Get logged-in user session
   useEffect(() => {
@@ -38,7 +40,7 @@ export default function ChatPage() {
       .then(([chatMod, callsMod]) => {
         setSdk({
           CometChat: chatMod.CometChat,
-          CometChatCalls: callsMod?.CometChatCalls
+          CometChatCalls: callsMod?.CometChatCalls || callsMod?.default
         });
       })
       .catch((err) => {
@@ -109,6 +111,40 @@ export default function ChatPage() {
     };
   }, [sdk]);
 
+  // Start Call Media Session in DOM Container
+  const startCallSession = (sessionId) => {
+    setActiveCallSession(sessionId);
+    if (sdk?.CometChatCalls && callContainerRef.current) {
+      const callTokenSetting = new sdk.CometChatCalls.CallTokenSettingsBuilder()
+        .setSessionId(sessionId)
+        .build();
+
+      sdk.CometChatCalls.generateToken(callTokenSetting)
+        .then((res) => {
+          const callCallSettings = new sdk.CometChatCalls.CallSettingsBuilder()
+            .enableDefaultLayout(true)
+            .setContainer(callContainerRef.current)
+            .build();
+
+          sdk.CometChatCalls.startCall(res.token, callCallSettings);
+        })
+        .catch((err) => console.error('Call token generation error:', err));
+    }
+  };
+
+  // End Call Media Session
+  const endCallSession = async () => {
+    if (activeCallSession && sdk?.CometChat) {
+      try {
+        await sdk.CometChat.endCall(activeCallSession);
+      } catch (err) {
+        console.error('Error ending call:', err);
+      }
+    }
+    setActiveCallSession(null);
+    setIncomingCall(null);
+  };
+
   // Initiate Voice or Video Call
   const initiateCall = async (callType) => {
     if (!activeTargetUser || !sdk?.CometChat) return;
@@ -162,12 +198,7 @@ export default function ChatPage() {
     }
   };
 
-  // Start Call Media Session
-  const startCallSession = (sessionId) => {
-    setActiveCallSession(sessionId);
-  };
-
-  // 5. Search Users API Call
+  // 5. Search Users API Call (Fixed typo 'fontally' -> 'finally')
   useEffect(() => {
     if (!searchQuery.trim() || !currentUser) {
       setSearchResults([]);
@@ -186,7 +217,7 @@ export default function ChatPage() {
         }
       } catch (err) {
         console.error('User search failed:', err);
-      } fontally {
+      } finally {
         setSearching(false);
       }
     }, 300);
@@ -269,11 +300,11 @@ export default function ChatPage() {
 
   if (!currentUser) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-black text-white p-4 font-mono">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-black text-white p-4 font-mono">
         <p className="text-sm mb-4 uppercase">NO ACTIVE SESSION FOUND</p>
         <a
           href="/"
-          className="border border-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-white hover:text-black"
+          className="border border-white px-4 py-2 text-xs uppercase tracking-widest hover:bg-white hover:text-black transition-colors"
         >
           GO TO LOGIN
         </a>
@@ -285,8 +316,21 @@ export default function ChatPage() {
     <CometChatWrapper uid={currentUser.cometchatUID}>
       <div className="flex h-screen bg-black text-white font-sans overflow-hidden relative">
         
+        {/* ACTIVE CALL MEDIA SCREEN OVERLAY */}
+        {activeCallSession && (
+          <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-between p-4">
+            <div ref={callContainerRef} className="w-full flex-1 rounded-lg overflow-hidden bg-zinc-900 min-h-0" />
+            <button
+              onClick={endCallSession}
+              className="mt-4 bg-rose-600 text-white font-mono font-bold text-xs uppercase px-8 py-3 hover:bg-rose-500 transition-colors"
+            >
+              END CALL
+            </button>
+          </div>
+        )}
+
         {/* INCOMING CALL MODAL POPUP */}
-        {incomingCall && (
+        {incomingCall && !activeCallSession && (
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
             <div className="bg-zinc-900 border border-zinc-700 p-6 max-w-sm w-full text-center space-y-4 font-mono">
               <span className="text-xs text-zinc-400 uppercase tracking-widest block">INCOMING CALL</span>
@@ -461,7 +505,7 @@ export default function ChatPage() {
               
               {/* Responsive Chat Header with Back Button for Mobile */}
               <div className="h-14 border-b border-zinc-800 px-4 md:px-6 flex items-center justify-between bg-zinc-950">
-                <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-3 truncate">
                   <button
                     onClick={() => setActiveTargetUser(null)}
                     className="md:hidden border border-zinc-700 px-2.5 py-1 text-xs font-mono text-zinc-300 hover:border-white"
@@ -477,7 +521,7 @@ export default function ChatPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex space-x-1.5 md:space-x-2 font-mono">
+                <div className="flex space-x-1.5 md:space-x-2 font-mono flex-shrink-0">
                   <button
                     onClick={() => initiateCall('audio')}
                     className="border border-zinc-700 px-2 md:px-3 py-1.5 text-[10px] md:text-xs text-white uppercase hover:border-white transition-colors"
