@@ -24,7 +24,6 @@ export default function ChatPage() {
   const messagesEndRef = useRef(null);
   const callContainerRef = useRef(null);
 
-  // 1. Mount check & load user from localStorage safely
   useEffect(() => {
     setIsMounted(true);
     try {
@@ -37,7 +36,6 @@ export default function ChatPage() {
     }
   }, []);
 
-  // 2. Dynamic import for SDKs and Builders
   useEffect(() => {
     if (!isMounted) return;
 
@@ -68,7 +66,6 @@ export default function ChatPage() {
     };
   }, [isMounted]);
 
-  // 3. Fetch Conversations
   const fetchConversations = async () => {
     if (!sdk?.CometChat) return;
     const { CometChat } = sdk;
@@ -105,7 +102,6 @@ export default function ChatPage() {
     }
   }, [sdk, currentUser]);
 
-  // 4. Call Listeners
   useEffect(() => {
     if (!sdk?.CometChat) return;
     const { CometChat } = sdk;
@@ -140,21 +136,18 @@ export default function ChatPage() {
     };
   }, [sdk, activeTargetUser]);
 
-  // Request browser camera/mic permissions explicitly before call initialization
   const requestMediaPermissions = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      // Stop tracks immediately after securing permission
       stream.getTracks().forEach((track) => track.stop());
       return true;
     } catch (err) {
-      console.error('Media permission denied or unavailable:', err);
-      alert('Camera and Microphone permissions are required to make video calls.');
+      console.error('Media permission error:', err);
+      alert('Camera and Microphone permissions are required.');
       return false;
     }
   };
 
-  // 5. Video Calling Setup
   const startCallSession = async (sessionId) => {
     const hasPermissions = await requestMediaPermissions();
     if (!hasPermissions) return;
@@ -162,36 +155,43 @@ export default function ChatPage() {
     setActiveCallSession(sessionId);
 
     if (!sdk?.CometChatCalls || !sdk?.CallTokenSettingsBuilder) {
-      console.error('CometChat Calls SDK not fully initialized');
+      console.error('CometChat Calls SDK not initialized');
       return;
     }
 
-    requestAnimationFrame(() => {
-      setTimeout(async () => {
-        const container = document.getElementById('call-container');
-        if (!container) return;
+    setTimeout(async () => {
+      const container = callContainerRef.current || document.getElementById('call-container');
+      if (!container) return;
 
-        try {
-          const callTokenSetting = new sdk.CallTokenSettingsBuilder()
-            .setSessionId(sessionId)
-            .build();
+      try {
+        const callTokenSetting = new sdk.CallTokenSettingsBuilder()
+          .setSessionId(sessionId)
+          .build();
 
-          const res = await sdk.CometChatCalls.generateToken(callTokenSetting);
+        const res = await sdk.CometChatCalls.generateToken(callTokenSetting);
 
-          const callCallSettings = new sdk.CallSettingsBuilder()
-            .enableDefaultLayout(true)
-            .setContainer(container)
-            .setIsAudioOnly(false)
-            .startWithVideoMuted(false)
-            .startWithAudioMuted(false)
-            .build();
+        const callCallSettings = new sdk.CallSettingsBuilder()
+          .enableDefaultLayout(true)
+          .setContainer(container)
+          .setIsAudioOnly(false)
+          .startWithVideoMuted(false)
+          .startWithAudioMuted(false)
+          .build();
 
-          await sdk.CometChatCalls.startCall(res.token, callCallSettings);
-        } catch (err) {
-          console.error('Error starting call session:', err);
+        await sdk.CometChatCalls.startCall(res.token, callCallSettings);
+
+        // Allow permissions on dynamically added iframe elements
+        const iframes = container.getElementsByTagName('iframe');
+        for (let i = 0; i < iframes.length; i++) {
+          iframes[i].setAttribute('allow', 'camera; microphone; display-capture; autoplay');
         }
-      }, 300);
-    });
+
+        // Force browser re-render for WebRTC video feed dimensions
+        window.dispatchEvent(new Event('resize'));
+      } catch (err) {
+        console.error('Error starting call session:', err);
+      }
+    }, 400);
   };
 
   const endCallCleanup = () => {
@@ -255,7 +255,6 @@ export default function ChatPage() {
     }
   };
 
-  // 6. Search Users
   useEffect(() => {
     if (!searchQuery.trim() || !currentUser) {
       setSearchResults([]);
@@ -282,7 +281,6 @@ export default function ChatPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, currentUser]);
 
-  // 7. Fetch Messages History
   const fetchMessages = async () => {
     if (!activeTargetUser || !sdk?.CometChat) return;
 
@@ -339,7 +337,6 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 8. Send Text Message
   async function handleSendMessage(e) {
     e.preventDefault();
     if (!textInput.trim() || !activeTargetUser || !sdk?.CometChat) return;
@@ -390,16 +387,16 @@ export default function ChatPage() {
         
         {/* ACTIVE CALL CONTAINER */}
         {activeCallSession && (
-          <div className="fixed inset-0 bg-black z-[9999] flex flex-col items-center justify-between p-6">
+          <div className="fixed inset-0 bg-black z-[9999] flex flex-col items-center justify-between p-4 md:p-6">
             <div
               id="call-container"
               ref={callContainerRef}
-              className="w-full max-w-5xl bg-zinc-900 rounded-lg overflow-hidden relative"
-              style={{ height: 'calc(100vh - 120px)', minHeight: '500px' }}
+              className="w-full max-w-5xl bg-zinc-900 rounded-lg overflow-hidden relative border border-zinc-800"
+              style={{ height: 'calc(100vh - 100px)', minHeight: '400px' }}
             />
             <button
               onClick={endCallSession}
-              className="mb-2 bg-rose-600 text-white font-mono font-bold text-xs uppercase px-8 py-3 hover:bg-rose-500 transition-colors z-50"
+              className="mt-4 bg-rose-600 text-white font-mono font-bold text-xs uppercase px-8 py-3 hover:bg-rose-500 transition-colors z-50"
             >
               END CALL
             </button>
@@ -557,8 +554,6 @@ export default function ChatPage() {
         <div className={`${activeTargetUser ? 'flex' : 'hidden md:flex'} flex-1 flex-col bg-black h-full w-full`}>
           {activeTargetUser ? (
             <div className="flex-1 flex flex-col h-full overflow-hidden">
-              
-              {/* Header */}
               <div className="h-14 border-b border-zinc-800 px-4 md:px-6 flex items-center justify-between bg-zinc-950">
                 <div className="flex items-center space-x-3 truncate">
                   <button
@@ -592,7 +587,6 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              {/* Messages Feed */}
               <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 bg-black">
                 {messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center">
@@ -667,7 +661,6 @@ export default function ChatPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Input Form */}
               <form onSubmit={handleSendMessage} className="p-3 md:p-4 border-t border-zinc-800 bg-zinc-950 flex gap-2">
                 <input
                   type="text"
