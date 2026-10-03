@@ -66,6 +66,7 @@ export default function ChatPage() {
     };
   }, [isMounted]);
 
+  // Fetch Conversations and sort by latest activity timestamp
   const fetchConversations = async () => {
     if (!sdk?.CometChat) return;
     const { CometChat } = sdk;
@@ -80,11 +81,18 @@ export default function ChatPage() {
       }
 
       const conversationsRequest = new CometChat.ConversationsRequestBuilder()
-        .setLimit(30)
+        .setLimit(50)
         .build();
 
       const convList = await conversationsRequest.fetchNext();
-      setConversations(convList || []);
+
+      const sorted = (convList || []).sort((a, b) => {
+        const timeA = a.getLastMessage()?.getSentAt() || 0;
+        const timeB = b.getLastMessage()?.getSentAt() || 0;
+        return timeB - timeA;
+      });
+
+      setConversations(sorted);
     } catch (err) {
       console.error('Failed to fetch conversations:', err);
       setConversations([]);
@@ -97,7 +105,7 @@ export default function ChatPage() {
     if (sdk && currentUser) {
       const timer = setTimeout(() => {
         fetchConversations();
-      }, 1000);
+      }, 500);
       return () => clearTimeout(timer);
     }
   }, [sdk, currentUser]);
@@ -160,7 +168,7 @@ export default function ChatPage() {
     }
 
     setTimeout(async () => {
-      const container = callContainerRef.current || document.getElementById('call-container');
+      const container = document.getElementById('call-container');
       if (!container) return;
 
       try {
@@ -179,19 +187,10 @@ export default function ChatPage() {
           .build();
 
         await sdk.CometChatCalls.startCall(res.token, callCallSettings);
-
-        // Allow permissions on dynamically added iframe elements
-        const iframes = container.getElementsByTagName('iframe');
-        for (let i = 0; i < iframes.length; i++) {
-          iframes[i].setAttribute('allow', 'camera; microphone; display-capture; autoplay');
-        }
-
-        // Force browser re-render for WebRTC video feed dimensions
-        window.dispatchEvent(new Event('resize'));
       } catch (err) {
         console.error('Error starting call session:', err);
       }
-    }, 400);
+    }, 500);
   };
 
   const endCallCleanup = () => {
@@ -212,7 +211,10 @@ export default function ChatPage() {
   };
 
   const initiateCall = async (callType) => {
-    if (!activeTargetUser || !sdk?.CometChat) return;
+    if (!activeTargetUser || !sdk?.CometChat) {
+      alert('SDK loading, please wait a second and try again.');
+      return;
+    }
 
     const { CometChat } = sdk;
     const receiverID = activeTargetUser.cometchatUID;
@@ -221,12 +223,17 @@ export default function ChatPage() {
 
     try {
       const call = new CometChat.Call(receiverID, type, receiverType);
-      await CometChat.initiateCall(call);
+      const initiatedCall = await CometChat.initiateCall(call);
       alert(`Calling ${activeTargetUser.name}...`);
+      
+      // If outgoing call auto-accepts or session exists immediately
+      if (initiatedCall?.getSessionId()) {
+        startCallSession(initiatedCall.getSessionId());
+      }
       fetchMessages();
     } catch (error) {
-      console.error('Call initiation failed:', error);
-      alert('Could not start call.');
+      console.error('Call initiation error details:', error);
+      alert(`Could not start call: ${error?.message || 'Check CometChat Calling Extension'}`);
     }
   };
 
@@ -387,16 +394,16 @@ export default function ChatPage() {
         
         {/* ACTIVE CALL CONTAINER */}
         {activeCallSession && (
-          <div className="fixed inset-0 bg-black z-[9999] flex flex-col items-center justify-between p-4 md:p-6">
+          <div className="fixed inset-0 bg-black z-[9999] flex flex-col items-center justify-between p-4">
             <div
               id="call-container"
               ref={callContainerRef}
-              className="w-full max-w-5xl bg-zinc-900 rounded-lg overflow-hidden relative border border-zinc-800"
-              style={{ height: 'calc(100vh - 100px)', minHeight: '400px' }}
+              className="w-full h-full max-w-5xl bg-zinc-900 rounded-lg overflow-hidden relative border border-zinc-800"
+              style={{ minHeight: '80vh' }}
             />
             <button
               onClick={endCallSession}
-              className="mt-4 bg-rose-600 text-white font-mono font-bold text-xs uppercase px-8 py-3 hover:bg-rose-500 transition-colors z-50"
+              className="mt-2 bg-rose-600 text-white font-mono font-bold text-xs uppercase px-8 py-3 hover:bg-rose-500 transition-colors z-50"
             >
               END CALL
             </button>
@@ -685,6 +692,7 @@ export default function ChatPage() {
             </div>
           )}
         </div>
+
 
       </div>
     </CometChatWrapper>
