@@ -24,7 +24,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef(null);
   const callContainerRef = useRef(null);
 
-  // Mark client hydration complete & load user safely
+  // 1. Mount check & load user from localStorage safely
   useEffect(() => {
     setIsMounted(true);
     try {
@@ -37,7 +37,7 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Safe dynamic import for CometChat & CometChatCalls (Prevents crash)
+  // 2. Safe dynamic imports for CometChat
   useEffect(() => {
     if (!isMounted) return;
 
@@ -72,13 +72,22 @@ export default function ChatPage() {
     };
   }, [isMounted]);
 
-  // Fetch Conversations
+  // 3. Fetch Conversations with session verification
   const fetchConversations = async () => {
     if (!sdk?.CometChat) return;
+    const { CometChat } = sdk;
 
     try {
       setLoadingConversations(true);
-      const conversationsRequest = new sdk.CometChat.ConversationsRequestBuilder()
+
+      // Verify CometChat session is active before fetching
+      const loggedInUser = await CometChat.getLoggedinUser();
+      if (!loggedInUser) {
+        setLoadingConversations(false);
+        return;
+      }
+
+      const conversationsRequest = new CometChat.ConversationsRequestBuilder()
         .setLimit(30)
         .build();
 
@@ -94,11 +103,15 @@ export default function ChatPage() {
 
   useEffect(() => {
     if (sdk && currentUser) {
-      fetchConversations();
+      // Small delay to ensure CometChatWrapper completes login
+      const timer = setTimeout(() => {
+        fetchConversations();
+      }, 1000);
+      return () => clearTimeout(timer);
     }
   }, [sdk, currentUser]);
 
-  // Call Event Listeners
+  // 4. Call Listeners
   useEffect(() => {
     if (!sdk?.CometChat) return;
     const { CometChat } = sdk;
@@ -123,7 +136,7 @@ export default function ChatPage() {
         })
       );
     } catch (e) {
-      console.error('Call listener registration error:', e);
+      console.error('Call listener error:', e);
     }
 
     return () => {
@@ -133,30 +146,36 @@ export default function ChatPage() {
     };
   }, [sdk, activeTargetUser]);
 
-  // Start Call Stream
+  // 5. Video Calling Setup
   const startCallSession = (sessionId) => {
     setActiveCallSession(sessionId);
 
-    if (sdk?.CometChatCalls && callContainerRef.current) {
-      try {
-        const callTokenSetting = new sdk.CometChatCalls.CallTokenSettingsBuilder()
-          .setSessionId(sessionId)
-          .build();
+    if (sdk?.CometChatCalls) {
+      setTimeout(() => {
+        if (!callContainerRef.current) return;
 
-        sdk.CometChatCalls.generateToken(callTokenSetting)
-          .then((res) => {
-            const callCallSettings = new sdk.CometChatCalls.CallSettingsBuilder()
-              .enableDefaultLayout(true)
-              .setContainer(callContainerRef.current)
-              .setIsAudioOnly(false)
-              .build();
+        try {
+          const callTokenSetting = new sdk.CometChatCalls.CallTokenSettingsBuilder()
+            .setSessionId(sessionId)
+            .build();
 
-            sdk.CometChatCalls.startCall(res.token, callCallSettings);
-          })
-          .catch((err) => console.error('Call token generation error:', err));
-      } catch (err) {
-        console.error('CometChatCalls start failed:', err);
-      }
+          sdk.CometChatCalls.generateToken(callTokenSetting)
+            .then((res) => {
+              const callCallSettings = new sdk.CometChatCalls.CallSettingsBuilder()
+                .enableDefaultLayout(true)
+                .setContainer(callContainerRef.current)
+                .setIsAudioOnly(false)
+                .startWithVideoMuted(false)
+                .startWithAudioMuted(false)
+                .build();
+
+              sdk.CometChatCalls.startCall(res.token, callCallSettings);
+            })
+            .catch((err) => console.error('Call token error:', err));
+        } catch (err) {
+          console.error('CometChatCalls start error:', err);
+        }
+      }, 150);
     }
   };
 
@@ -177,7 +196,6 @@ export default function ChatPage() {
     fetchMessages();
   };
 
-  // Initiate Call
   const initiateCall = async (callType) => {
     if (!activeTargetUser || !sdk?.CometChat) return;
 
@@ -193,7 +211,7 @@ export default function ChatPage() {
       fetchMessages();
     } catch (error) {
       console.error('Call initiation failed:', error);
-      alert('Could not start call. Check camera/mic permissions in browser settings.');
+      alert('Could not start call. Check browser camera/microphone permissions.');
     }
   };
 
@@ -222,7 +240,7 @@ export default function ChatPage() {
     }
   };
 
-  // Search Users
+  // 6. Search Users
   useEffect(() => {
     if (!searchQuery.trim() || !currentUser) {
       setSearchResults([]);
@@ -249,7 +267,7 @@ export default function ChatPage() {
     return () => clearTimeout(timer);
   }, [searchQuery, currentUser]);
 
-  // Fetch Message History
+  // 7. Fetch Messages History
   const fetchMessages = async () => {
     if (!activeTargetUser || !sdk?.CometChat) return;
 
@@ -306,7 +324,7 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Send Message
+  // 8. Send Text Message
   async function handleSendMessage(e) {
     e.preventDefault();
     if (!textInput.trim() || !activeTargetUser || !sdk?.CometChat) return;
@@ -355,13 +373,14 @@ export default function ChatPage() {
     <CometChatWrapper uid={currentUser.cometchatUID}>
       <div className="flex h-screen bg-black text-white font-sans overflow-hidden relative">
         
-        {/* ACTIVE CALL MEDIA SCREEN CONTAINER */}
+        {/* ACTIVE CALL CONTAINER */}
         {activeCallSession && (
           <div className="absolute inset-0 bg-black z-50 flex flex-col items-center justify-between p-4">
             <div
               ref={callContainerRef}
               id="call-container"
-              className="w-full flex-1 rounded-lg overflow-hidden bg-zinc-900 min-h-0 relative"
+              className="w-full flex-1 rounded-lg overflow-hidden bg-zinc-900 min-h-[400px] relative"
+              style={{ width: '100%', height: 'calc(100vh - 100px)' }}
             />
             <button
               onClick={endCallSession}
@@ -372,7 +391,7 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* INCOMING CALL MODAL POPUP */}
+        {/* INCOMING CALL MODAL */}
         {incomingCall && !activeCallSession && (
           <div className="absolute inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
             <div className="bg-zinc-900 border border-zinc-700 p-6 max-w-sm w-full text-center space-y-4 font-mono">
