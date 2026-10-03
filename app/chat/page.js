@@ -698,3 +698,13 @@ export default function ChatPage() {
     </CometChatWrapper>
   );
 }
+
+
+// Built a real-time communication platform for the CometChat Zero to Chat Hackathon 2026!
+
+// Built with Next.js, Node.js, MongoDB & CometChat using CometChat MCP/Skills
+
+// 🌐 Live: https://we-chat-lac.vercel.app/chat
+// 💻 GitHub: https://github.com/devspark-2501/WeChat
+
+// @CometChat #ZeroToChat
